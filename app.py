@@ -1,12 +1,11 @@
 from flask import Flask, render_template, request,jsonify
 from flask_cors import CORS,cross_origin
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup as bs
 from urllib.request import urlopen as uReq
 import logging
-import pymongo
 logging.basicConfig(filename="scrapper.log" , level=logging.INFO)
-import os
+import pymongo
 
 app = Flask(__name__)
 
@@ -17,61 +16,78 @@ def homepage():
 @app.route("/review" , methods = ['POST' , 'GET'])
 def index():
     if request.method == 'POST':
+        try:
+            searchString = request.form['content'].replace(" ","")
+            flipkart_url = "https://www.flipkart.com/search?q=" + searchString
+            uClient = uReq(flipkart_url)
+            flipkartPage = uClient.read()
+            uClient.close()
+            flipkart_html = bs(flipkartPage, "html.parser")
+            bigboxes = flipkart_html.findAll("div", {"class": "_1AtVbE col-12-12"})
+            del bigboxes[0:3]
+            box = bigboxes[0]
+            productLink = "https://www.flipkart.com" + box.div.div.div.a['href']
+            prodRes = requests.get(productLink)
+            prodRes.encoding='utf-8'
+            prod_html = bs(prodRes.text, "html.parser")
+            print(prod_html)
+            commentboxes = prod_html.find_all('div', {'class': "_16PBlm"})
+
+            filename = searchString + ".csv"
+            fw = open(filename, "w")
+            headers = "Product, Customer Name, Rating, Heading, Comment \n"
+            fw.write(headers)
+            reviews = []
+            for commentbox in commentboxes:
                 try:
+                    #name.encode(encoding='utf-8')
+                    name = commentbox.div.div.find_all('p', {'class': '_2sc7ZR _2V5EHH'})[0].text
 
-                    # query to search for images
-                    query = request.form['content'].replace(" ","")
+                except:
+                    logging.info("name")
 
-                            # directory to store downloaded images
-                    save_directory = "images/"
-
-                            # create the directory if it doesn't exist
-                    if not os.path.exists(save_directory):
-                        os.makedirs(save_directory)
-
+                try:
+                    #rating.encode(encoding='utf-8')
+                    rating = commentbox.div.div.div.div.text
 
 
-                            # fake user agent to avoid getting blocked by Google
-                    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"}
+                except:
+                    rating = 'No Rating'
+                    logging.info("rating")
 
-                            # fetch the search results page
-                    response = requests.get(f"https://www.google.com/search?q={query}&sxsrf=AJOqlzUuff1RXi2mm8I_OqOwT9VjfIDL7w:1676996143273&source=lnms&tbm=isch&sa=X&ved=2ahUKEwiq-qK7gaf9AhXUgVYBHYReAfYQ_AUoA3oECAEQBQ&biw=1920&bih=937&dpr=1#imgrc=1th7VhSesfMJ4M")
+                try:
+                    #commentHead.encode(encoding='utf-8')
+                    commentHead = commentbox.div.div.div.p.text
 
-
-                            # parse the HTML using BeautifulSoup
-                    soup = BeautifulSoup(response.content, "html.parser")
-
-                            # find all img tags
-                    image_tags = soup.find_all("img")
-
-                            # download each image and save it to the specified directory
-                    del image_tags[0]
-                    img_data=[]
-                    for index,image_tag in enumerate(image_tags):
-                                # get the image source URL
-                                image_url = image_tag['src']
-                                #print(image_url)
-                                
-                                # send a request to the image URL and save the image
-                                image_data = requests.get(image_url).content
-                                mydict={"Index":index,"Image":image_data}
-                                img_data.append(mydict)
-                                with open(os.path.join(save_directory, f"{query}_{image_tags.index(image_tag)}.jpg"), "wb") as f:
-                                    f.write(image_data)
-                    client = pymongo.MongoClient("mongodb+srv://pwskills:pwskills@cluster0.ln0bt5m.mongodb.net/?retryWrites=true&w=majority")
-                    db = client['image_scrap']
-                    review_col = db['image_scrap_data']
-                    review_col.insert_many(img_data)          
-
-                    return "image laoded"
+                except:
+                    commentHead = 'No Comment Heading'
+                    logging.info(commentHead)
+                try:
+                    comtag = commentbox.div.div.find_all('div', {'class': ''})
+                    #custComment.encode(encoding='utf-8')
+                    custComment = comtag[0].div.text
                 except Exception as e:
                     logging.info(e)
-                    return 'something is wrong'
-            # return render_template('results.html')
+
+                mydict = {"Product": searchString, "Name": name, "Rating": rating, "CommentHead": commentHead,
+                          "Comment": custComment}
+                reviews.append(mydict)
+            logging.info("log my final result {}".format(reviews))
+
+            client=pymongo.MongoClient("mongodb+srv://yogeshtiwari007:12420Iaf4r@cluster0.tx2ggw4.mongodb.net/?retryWrites=true&w=majority")
+            db=client.test
+            review_col=db['review_scrap_data']
+            review_col.insert_many(reviews)
+
+            return render_template('result.html', reviews=reviews[0:(len(reviews)-1)])
+        except Exception as e:
+            logging.info(e)
+            return 'something is wrong'
+    # return render_template('results.html')
 
     else:
         return render_template('index.html')
 
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8000)
+if __name__=="__main__":
+    app.run(host="0.0.0.0")
